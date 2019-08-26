@@ -259,6 +259,8 @@ class ArangoTextInfoModel(TextInfoModel):
             self.flush_documents()
 
     def flush_documents(self):
+        if len(self.queue) == 0: # Sometimes indexing error occurs without this..
+            return
         print('\033[2K\r' + self.queue[-1]['path'],end='')
         self.db['html_text'].import_bulk_logged(self.queue)
         self.queue.clear()

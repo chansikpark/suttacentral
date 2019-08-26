@@ -242,7 +242,8 @@ def process_dir(change_tracker, po_dir, authors, info, storage_dir):
         # this doc is for the markup
         yield {'uid': uid, 'markup_path': str(markup_storage_file), 'mtime': mtime}
 
-    for sub_folder in po_dir.glob('*/'):
+    sub_folders = (f for f in po_dir.glob('*/'))
+    for sub_folder in sorted(sub_folders, key=humansortkey):
         yield from process_dir(
             change_tracker, sub_folder, authors, info=info, storage_dir=storage_dir
         )
@@ -332,34 +333,63 @@ def load_po_texts(change_tracker, po_dir, db, additional_info_dir, storage_dir):
         r = db['po_strings'].import_bulk_logged(string_docs, on_duplicate='ignore')
 
 
+# Would require heavy revision once translation segmentations for languages
+# other than Pali are made available 
 class VolpageGetter:
 
-    regexes = [
-        regex.compile(r'<a class="(pts1ed)" id="(.*?)"></a>'),
-        regex.compile(r'<a class="(pts2ed)" id="(.*?)"></a>'),
-        regex.compile(r'<a class="(pts-vp-pli|pts)" id="(.*?)"></a>'),
-    ]
+    # This is made static for the case when a subfolder of
+    # po-files begins with one that has no volpage and should
+    # use that of the prior subfolder's last po-file.
+    last_volpage = None
 
-    def __init__(self):
-        self.last_volpage = None
+    # TODO: other books from KN, Vinaya, and Abhidhamma
+    uid_to_ptsbook_mapping = {
+        'an': 'AN',
+        'dn': 'DN',
+        'mn': 'MN',
+        'sn': 'SN',
+        'thag': 'Thag',
+        'thig': 'Thig',
+        'bu': 'Vin',
+        'bi': 'Vin',
+        'pvr': 'Vin',
+    }
+
+    # (Since six is good enough for textdata.py's PaliPageNumbinator.)
+    dec_to_rom_mapping = {'1': 'i', '2': 'ii', '3': 'iii', '4': 'iv', '5': 'v', '6': 'vi'}
 
     def __call__(self, markup, filepath):
+        # Determine PTS shorthand from file name
+        ptsbook = None
+        for prefix in regex.match(r'^[a-z-]+', filepath.stem)[0].split('-'):
+            ptsbook = VolpageGetter.uid_to_ptsbook_mapping.get(prefix)
+            if ptsbook:
+                break
+
+        # Previous regexes were obsolete.
+        # Survey of markup files revealed four possible forms.
+        # Always prefer second edition over first where available.
         volpages = []
+        for m in regex.findall(r'<a class="pts" id="(-vp-pli|pts|2ed)(.*?)">', markup):
+            num = m[1].split('.')
+            if len(num) == 1:
+                volpages.append(f'{ptsbook} {num[0]}')
+            elif len(num) == 2:
+                book = VolpageGetter.dec_to_rom_mapping.get(num[0])
+                page = num[1]
+                volpages.append(f'{ptsbook} {book} {page}')
 
-        for rex in self.regexes:
-            m = rex.search(markup)
-            if m:
-                class_ = m[1]
-                volpage = m[2]
-                if not volpage.startswith(class_):
-                    volpage = class_ + volpage
-                volpages.append(volpage)
-
-        volpage = ', '.join(volpages)
-        if volpage:
-            self.last_volpage = volpage
-            return volpage
-        elif self.last_volpage:
-            return self.last_volpage
+        # Previously, all the jeans-&-tshirt volpages were returned concatenated with commas.
+        # Here we return just the first one as suit-&-tie.
+        if ptsbook:
+            if len(volpages):
+                VolpageGetter.last_volpage = volpages[-1]
+                # TODO: There will be many instances where the returned volpage
+                # is one after the true page number. We need to check whether
+                # the reference occurs in the first line of content.
+                # If it doesn't, the volpage should be the last one instead.
+                return volpages[0]
+            elif VolpageGetter.last_volpage and VolpageGetter.last_volpage.startswith(ptsbook):
+                return VolpageGetter.last_volpage
         print(f'Could not determine volpage for {filepath}')
         return None
