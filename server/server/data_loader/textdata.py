@@ -381,8 +381,7 @@ class PaliPageNumbinator:
         for k, v in entries.items():
 
             # We are here only interested in concordance between Mahasangiti
-            # editions and Pali Text Society ones. Mahasangiti because the
-            # legacy html texts in Pali have these coded into them.
+            # editions and Pali Text Society ones.
             ms = None
             pts = []
 
